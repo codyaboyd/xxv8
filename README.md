@@ -1,102 +1,146 @@
 # xxv8
 
-`xxv8` is a simple **client/server wrapper around `pkg`** that helps you compile a JavaScript project into platform-specific binaries.
+`xxv8` is a JavaScript binary build wrapper around [`pkg`](https://github.com/vercel/pkg).
 
-At a high level:
+It supports:
 
-1. The **client** zips a project directory and uploads it.
-2. The **server** receives the zip and runs `pkg` for multiple targets.
-3. The server returns a `compiled_binaries.zip` archive containing the generated executables.
+1. A **server/client** workflow for remote compilation.
+2. A **CI-first local build command** (`ci`) that is easy to plug into CI/CD pipelines.
 
-## Features
+---
 
-- Minimal CLI with two commands: `server` and `client`
-- Automatically zips and uploads a project from the client
-- Compiles for these targets on the server:
-  - `node18-x64-linux`
-  - `node18-arm64-linux`
-  - `node18-x64-macos`
-  - `node18-arm64-macos`
-  - `node18-x64-win`
-  - `node18-arm64-win`
-- Returns all compiled artifacts in a single archive
+## Why the `ci` command?
+
+The `ci` command is optimized for pipelines:
+
+- Non-interactive and deterministic CLI flags
+- Predictable output layout under a single output folder
+- Explicit failure codes for failed builds (so pipelines fail correctly)
+- Configurable entrypoint, targets, and output directory
+
+---
 
 ## Requirements
 
-- Node.js (18+ recommended)
+- Node.js 18+
 - npm
-- Network connectivity between client and server
 
-## Installation
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-## CLI Usage
+---
 
-Run as a Node script:
+## CLI Usage
 
 ```bash
 node xxv8.js server <port>
 node xxv8.js client <path/to/commonjs/project> <host:port>
+node xxv8.js ci <projectPath> [--entry path/to/entry.js] [--targets csv] [--out-dir dist] [--clean]
 ```
 
-If you package `xxv8` itself as a binary (optional):
+### `ci` command options
+
+- `--entry`: Relative path from `projectPath` to your entry file.
+  - If omitted, xxv8 resolves in this order: `package.json#bin`, then `package.json#main`, then `index.js`.
+- `--targets`: Comma-separated pkg targets.
+  - Default:
+    - `node18-x64-linux`
+    - `node18-arm64-linux`
+    - `node18-x64-macos`
+    - `node18-arm64-macos`
+    - `node18-x64-win`
+    - `node18-arm64-win`
+- `--out-dir`: Output directory (default: `<projectPath>/dist`)
+- `--clean`: Empties output directory before building
+
+### CI build examples
+
+Build current project for all default targets:
 
 ```bash
-./xxv8 server <port>
-./xxv8 client <path/to/commonjs/project> <host:port>
+node xxv8.js ci . --clean
 ```
 
-### Examples
+Build a specific entrypoint to Linux only:
 
-Start server on port 3000:
+```bash
+node xxv8.js ci . --entry src/cli.js --targets node18-x64-linux,node18-arm64-linux --out-dir artifacts --clean
+```
+
+---
+
+## CI/CD Integration
+
+`package.json` includes a ready script:
+
+```bash
+npm run ci:build
+```
+
+This runs:
+
+```bash
+node xxv8.js ci . --clean
+```
+
+### GitHub Actions example
+
+```yaml
+name: Build binaries
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build binaries
+        run: npm run ci:build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xxv8-binaries
+          path: dist/
+```
+
+---
+
+## Server/Client mode (legacy workflow)
+
+Start server:
 
 ```bash
 node xxv8.js server 3000
 ```
 
-Send a local project to that server:
+Send project to server:
 
 ```bash
 node xxv8.js client ./my-project 127.0.0.1:3000
 ```
 
-After a successful run, the client writes:
+The client writes `compiled_binaries.zip` in the current working directory.
 
-- `compiled_binaries.zip` in the current working directory.
-
-## How compilation currently works
-
-On upload, the server:
-
-1. Extracts the project archive.
-2. Finds JavaScript files in the extracted root folder.
-3. Picks the **first `.js` file** found as the entrypoint.
-4. Runs `pkg` against each target.
-5. Zips the output folders and streams them back to the client.
-
-## Optional: package xxv8 itself
-
-You can compile this tool to a standalone executable with `pkg`:
-
-```bash
-npx pkg xxv8.js -t node18-x64-linux
-```
-
-Or build multiple targets:
-
-```bash
-npx pkg xxv8.js -t node18-x64/arm64-macos/windows/linux
-```
-
-## Troubleshooting
-
-- **"Invalid command" or usage shown**: verify command order and required arguments.
-- **Client cannot connect**: check host/port and firewall rules.
-- **No binaries returned**: ensure the uploaded project includes a `.js` file at the extracted root.
-- **Large projects fail**: verify available disk space and memory on the server.
+---
 
 ## License
 
